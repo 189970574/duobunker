@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#12141a">
+<title>地堡搭档 · 双人在线末日生存</title>
+<style>
+  :root {
+    --bg: #12141a;
+    --panel: #1c2029;
+    --panel2: #232835;
+    --line: #323949;
+    --txt: #e8e3d8;
+    --dim: #9aa1b0;
+    --accent: #ffb454;
+    --accent2: #ff8a3d;
+    --good: #7ec96b;
+    --bad: #e5654f;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background: radial-gradient(120% 90% at 50% 0%, #1a1e27 0%, var(--bg) 60%) fixed;
+    color: var(--txt);
+    font-family: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 16px;
+    overflow: hidden;
+    -webkit-user-select: none; user-select: none;
+    touch-action: manipulation;
+  }
+  .hidden { display: none !important; }
+
+  /* 顶部连接横幅 */
+  #conn-banner {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 60;
+    background: #8a3b2c; color: #ffe1d1; text-align: center;
+    padding: 8px 12px; font-size: 13px;
+  }
+
+  main { height: 100%; }
+  section {
+    height: 100%; padding: max(16px, env(safe-area-inset-top)) 18px 18px;
+    display: flex; flex-direction: column; gap: 14px;
+    max-width: 560px; margin: 0 auto;
+    overflow-y: auto;
+  }
+
+  .title-wrap { margin: 10vh 0 4px; text-align: center; }
+  h1 { margin: 0; font-size: 40px; letter-spacing: 6px; color: var(--accent); text-shadow: 0 2px 14px rgba(255,180,84,.25); }
+  .subtitle { color: var(--dim); margin-top: 10px; font-size: 14px; letter-spacing: 2px; }
+  .lamp {
+    width: 46px; height: 46px; margin: 0 auto 14px; border-radius: 50%;
+    background: radial-gradient(circle, #ffdf9e 0%, #ffb454 45%, #5a3d1a 100%);
+    box-shadow: 0 0 40px rgba(255,180,84,.45);
+    animation: sway 3.4s ease-in-out infinite;
+  }
+  @keyframes sway { 0%,100% { transform: rotate(-6deg) translateX(-4px);} 50% { transform: rotate(6deg) translateX(4px);} }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 14px 16px;
+  }
+  .label { color: var(--dim); font-size: 13px; margin: 4px 2px; }
+  input[type="text"] {
+    width: 100%; padding: 13px 14px; font-size: 17px; color: var(--txt);
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 10px;
+    outline: none;
+  }
+  input[type="text"]:focus { border-color: var(--accent); }
+
+  .btn {
+    display: block; width: 100%; padding: 15px 16px; margin-top: 4px;
+    font-size: 18px; font-weight: 600; letter-spacing: 2px;
+    color: #241505; background: linear-gradient(180deg, var(--accent), var(--accent2));
+    border: none; border-radius: 12px; cursor: pointer;
+  }
+  .btn:disabled { opacity: .45; }
+  .btn.ghost {
+    color: var(--txt); background: var(--panel2); border: 1px solid var(--line);
+  }
+  .btn.small { padding: 10px 14px; font-size: 15px; width: auto; }
+
+  /* 大厅 */
+  .roomcode {
+    font-size: 44px; font-weight: 800; letter-spacing: 10px; text-align: center;
+    color: var(--accent); margin: 6px 0;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  .lob-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  .lob-row input { flex: 1; font-size: 13px; color: var(--dim); }
+
+  /* 搜刮 */
+  #scr-scav { padding-bottom: max(86px, calc(env(safe-area-inset-bottom) + 76px)); }
+  .scav-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #scav-timer {
+    font-size: 30px; font-weight: 800; color: var(--accent);
+    font-family: ui-monospace, monospace; min-width: 76px;
+  }
+  #scav-timer.urgent { color: var(--bad); animation: blink 1s step-end infinite; }
+  @keyframes blink { 50% { opacity: .35; } }
+  .baginfo { color: var(--dim); font-size: 13px; text-align: right; line-height: 1.5; }
+  #bag-chips { display: flex; flex-wrap: wrap; gap: 4px; min-height: 26px; margin-top: 4px; }
+  .chip {
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 999px;
+    padding: 2px 8px; font-size: 13px; white-space: nowrap;
+  }
+  #house {
+    position: relative; width: 100%; flex: 1; min-height: 420px;
+    background: #14161d; border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+  }
+  .room { position: absolute; border: 1px dashed #3a4152; border-radius: 10px; }
+  .room span {
+    position: absolute; top: 6px; left: 10px; font-size: 12px; color: #4d5566; letter-spacing: 3px;
+  }
+  .item {
+    position: absolute; width: 84px; padding: 6px 4px 7px;
+    background: rgba(35,40,53,.92); border: 1px solid var(--line); border-radius: 10px;
+    color: var(--txt); text-align: center; cursor: pointer; z-index: 5;
+    transition: transform .08s;
+  }
+  .item:active { transform: scale(.92); }
+  .ii-icon { display: block; font-size: 24px; line-height: 1.15; }
+  .ii-name { display: block; font-size: 12px; color: var(--dim); }
+  .item.taken { opacity: .28; border-style: dotted; }
+  .item.heavy { border-color: #6b5a86; }
+  .item.heavy-glow {
+    border-color: var(--accent); box-shadow: 0 0 18px rgba(255,180,84,.55);
+    animation: glowPulse .7s ease-in-out infinite alternate; z-index: 6;
+  }
+  @keyframes glowPulse { from { box-shadow: 0 0 8px rgba(255,180,84,.35);} to { box-shadow: 0 0 24px rgba(255,180,84,.8);} }
+  .item.heavy-wait { border-color: #8a6bd0; }
+  .scav-foot {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    padding: 10px 16px max(12px, env(safe-area-inset-bottom));
+    background: linear-gradient(180deg, rgba(18,20,26,0) 0%, var(--bg) 38%);
+    display: flex; justify-content: center;
+  }
+
+  /* 日程 HUD */
+  .hud { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #hud-day { font-size: 20px; font-weight: 800; color: var(--accent); letter-spacing: 2px; }
+  .hud .res { font-size: 16px; }
+  #hud-items { width: 100%; display: flex; flex-wrap: wrap; gap: 4px; }
+  #hud-players { width: 100%; display: flex; gap: 10px; }
+  .pp { flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 13px; }
+  .pp b { display: block; margin-bottom: 5px; font-size: 13px; }
+  .pp.dead { opacity: .45; filter: grayscale(.7); }
+  .bar { height: 7px; background: #10131a; border-radius: 4px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: linear-gradient(90deg, #e5654f, #f2a35e); }
+  .bar.san { margin-top: 4px; }
+  .bar.san i { background: linear-gradient(90deg, #4f7fd0, #7ec96b); }
+
+  /* 事件卡 */
+  #event-card { flex: 1; display: flex; flex-direction: column; gap: 12px; }
+  #ev-title { font-size: 24px; font-weight: 800; letter-spacing: 2px; color: var(--accent); margin: 2px 0 0; }
+  #ev-text { line-height: 1.75; font-size: 16px; }
+  #ev-options { display: flex; flex-direction: column; gap: 10px; }
+  .opt {
+    padding: 15px 16px; font-size: 16px; text-align: left;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 12px;
+    color: var(--txt); cursor: pointer;
+  }
+  .opt:disabled { opacity: .4; }
+  .opt.mine { border-color: var(--accent); color: var(--accent); }
+  #ev-status { color: var(--dim); font-size: 14px; min-height: 20px; }
+  #ev-reveal { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  #ev-reveal-text { line-height: 1.7; }
+  #ev-reveal-lines { margin-top: 8px; color: var(--accent); font-size: 14px; display: flex; flex-direction: column; gap: 2px; }
+
+  /* 协作小挑战 */
+  #ev-skill { display: flex; flex-direction: column; gap: 10px; }
+  .skill-bar { height: 18px; background: #10131a; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .skill-bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #e5654f, #ffb454); transition: width .15s; }
+  .skill-bar i.ok { background: linear-gradient(90deg, #7ec96b, #b7e39a); }
+  #skill-count { text-align: center; color: var(--dim); font-size: 14px; }
+  #skill-btn {
+    padding: 26px 0; font-size: 26px; font-weight: 900; letter-spacing: 6px;
+    color: #241505; background: linear-gradient(180deg, var(--accent), var(--accent2));
+    border: none; border-radius: 14px; cursor: pointer;
+  }
+  #skill-btn:active { transform: scale(.97); }
+
+  /* 夜晚 */
+  #scr-night .card { flex: 1; }
+  #night-logs { display: flex; flex-direction: column; gap: 8px; line-height: 1.6; }
+  #night-hud { color: var(--dim); font-size: 14px; }
+
+  /* 结局 */
+  #end-title { font-size: 26px; color: var(--accent); letter-spacing: 2px; }
+  #end-text { line-height: 1.8; }
+  #end-stats { color: var(--dim); display: flex; flex-direction: column; gap: 6px; }
+  #end-stats b { color: var(--txt); }
+
+  /* toast */
+  #toast {
+    position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%) translateY(20px);
+    background: rgba(28,32,41,.96); border: 1px solid var(--line); color: var(--txt);
+    padding: 10px 18px; border-radius: 999px; font-size: 15px;
+    opacity: 0; pointer-events: none; transition: all .22s; z-index: 70; max-width: 86vw; text-align: center;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* 背包浮层 */
+  #bag-overlay {
+    position: fixed; inset: 0; background: rgba(8,9,12,.82); z-index: 65;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  #bag-overlay .card { width: 100%; max-width: 340px; }
+  .bag-row { padding: 7px 4px; border-bottom: 1px dashed var(--line); font-size: 15px; }
+  .bag-row.empty { color: var(--dim); }
+</style>
+</head>
+<body>
+<div id="conn-banner" class="hidden"></div>
+<main>
+
+  <!-- 主页 -->
+  <section id="scr-home">
+    <div class="title-wrap">
+      <div class="lamp"></div>
+      <h1>地堡搭档</h1>
+      <div class="subtitle">双人在线 · 末日搜刮与生存合作</div>
+    </div>
+    <div class="card">
+      <div class="label">你的昵称</div>
+      <input type="text" id="inp-name" maxlength="8" placeholder="怎么称呼你？">
+    </div>
+    <button class="btn" id="btn-host">创建房间（当房主）</button>
+    <button class="btn ghost" id="btn-goto-join">加入房间（输房间码）</button>
+    <div class="card" style="color:var(--dim); font-size:13px; line-height:1.7;">
+      玩法：两人一起 60 秒抢物资（大件要两人合力）→ 躲进地堡过 10 天 →
+      每天面对事件，两人"暗选同亮"或轮流决策 → 活到救援就是胜利。<br>
+      联机说明：只需其中一人生成房间码，另一台手机输入即可，无需服务器账号。
+    </div>
+  </section>
+
+  <!-- 加入 -->
+  <section id="scr-join" class="hidden">
+    <div class="title-wrap" style="margin-top:6vh;">
+      <h1 style="font-size:30px;">加入房间</h1>
+    </div>
+    <div class="card">
+      <div class="label">房间码（房主发给你，5 位）</div>
+      <input type="text" id="inp-room" maxlength="5" placeholder="例如：A7K2M" autocapitalize="characters" style="text-transform:uppercase; letter-spacing:6px; font-size:22px;">
+    </div>
+    <button class="btn" id="btn-join-go">连接房间</button>
+    <button class="btn ghost" id="btn-join-back">返回</button>
+  </section>
+
+  <!-- 大厅 -->
+  <section id="scr-lobby" class="hidden">
+    <div class="title-wrap" style="margin-top:6vh;">
+      <h1 style="font-size:30px;">房间就绪</h1>
+    </div>
+    <div class="card" style="text-align:center;">
+      <div class="label">房间码 · 告诉朋友</div>
+      <div class="roomcode" id="lob-code">—</div>
+      <div style="margin-top:8px; display:flex; flex-direction:column; gap:6px;">
+        <div>🧍 <span id="lob-me">—</span></div>
+        <div>🧍 <span id="lob-peer">等待对方加入…</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="label">邀请链接（对方打开自动进房）</div>
+      <div class="lob-row">
+        <input type="text" id="lob-share" readonly>
+        <button class="btn ghost small" id="btn-copy">复制</button>
+      </div>
+    </div>
+    <button class="btn hidden" id="btn-start">等待队友加入…</button>
+    <div class="card hidden" id="lob-guest-tip" style="color:var(--dim); font-size:14px;">
+      已连接！等房主点击"开始搜刮"。
+    </div>
+  </section>
+
+  <!-- 搜刮 -->
+  <section id="scr-scav" class="hidden">
+    <div class="scav-top">
+      <div id="scav-timer">60s</div>
+      <div class="baginfo">
+        <span id="bag-mine">我的背包 0/8</span><br>
+        <span id="bag-peer">搭档背包 0/8</span>
+      </div>
+    </div>
+    <div id="bag-chips"></div>
+    <div id="house"></div>
+    <div class="scav-foot">
+      <button class="btn ghost" id="btn-bag" style="width:100%;">查看我的背包</button>
+    </div>
+  </section>
+
+  <!-- 日程 -->
+  <section id="scr-day" class="hidden">
+    <div class="hud">
+      <span id="hud-day">第 1 天</span>
+      <span class="res" id="hud-food">🥫 0</span>
+      <span class="res" id="hud-water">🧴 0</span>
+      <div id="hud-items"></div>
+      <div id="hud-players"></div>
+    </div>
+    <div id="event-card" class="card">
+      <h2 id="ev-title"></h2>
+      <div id="ev-text"></div>
+      <div id="ev-options"></div>
+      <div id="ev-reveal" class="hidden">
+        <div id="ev-reveal-text"></div>
+        <div id="ev-reveal-lines"></div>
+      </div>
+      <div id="ev-skill" class="hidden">
+        <div class="skill-bar"><i id="skill-bar-i"></i></div>
+        <div id="skill-count">0 / 20 次合力</div>
+        <button id="skill-btn">点！按！</button>
+      </div>
+      <div id="ev-status"></div>
+    </div>
+  </section>
+
+  <!-- 夜晚 -->
+  <section id="scr-night" class="hidden">
+    <div id="night-hud">—</div>
+    <div class="card">
+      <h2 style="color:var(--accent); letter-spacing:2px;">🌙 夜间结算</h2>
+      <div id="night-logs"></div>
+    </div>
+  </section>
+
+  <!-- 结局 -->
+  <section id="scr-end" class="hidden">
+    <div class="title-wrap" style="margin-top:8vh;">
+      <div class="lamp"></div>
+      <h1 id="end-title" style="font-size:28px; letter-spacing:2px;">结局</h1>
+    </div>
+    <div class="card">
+      <div id="end-text"></div>
+    </div>
+    <div class="card" id="end-stats"></div>
+    <button class="btn hidden" id="btn-again">再来一局</button>
+    <div class="card hidden" id="end-wait" style="color:var(--dim); font-size:14px;">等房主点"再来一局"。</div>
+  </section>
+
+</main>
+<div id="bag-overlay" class="hidden">
+  <div class="card">
+    <h2 style="color:var(--accent);">🎒 我的背包</h2>
+    <div id="bag-list"></div>
+    <button class="btn ghost" id="btn-bag-close" style="margin-top:10px;">关上背包</button>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="js/mqtt.min.js"></script>
+<script src="js/net.js"></script>
+<script src="js/data.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
