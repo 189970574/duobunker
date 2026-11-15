@@ -72,10 +72,12 @@
       res: { food: 0, water: 0 },
       items: { medkit: 0, medicine: 0, mask: 0, radio: 0, flashlight: 0, battery: 0, rifle: 0, ammo: 0, cards: 0, doll: 0, generator: 0 },
       players: {
-        host: { name: S.myName, health: 100, sanity: 60, alive: true },
-        guest: { name: S.peerName || '等待加入…', health: 100, sanity: 60, alive: true }
+        host: { name: S.myName, health: 100, sanity: 60, alive: true, status: { sick: 0, injured: 0, inspired: 0 } },
+        guest: { name: S.peerName || '等待加入…', health: 100, sanity: 60, alive: true, status: { sick: 0, injured: 0, inspired: 0 } }
       },
       scav: { items: [], timeLeft: D.SCAV_SECONDS, bag: { host: [], guest: [] }, heavyPending: {}, started: false },
+      flags: { l1: false, l2: false, mice: false, fortified: false, letter: false, lgift: false },
+      stats: { claims: { host: 0, guest: 0 }, skillWins: 0 },
       pools: {
         joint: shuffle(D.EVENTS.joint.map(function (e) { return e.id; })),
         single: shuffle(D.EVENTS.single.map(function (e) { return e.id; })),
@@ -99,8 +101,20 @@
       G.pools[type] = shuffle(D.EVENTS[type].map(function (e) { return e.id; }));
       pool = G.pools[type];
     }
-    var id = pool.shift();
-    return findEvent(type, id);
+    // 条件事件过滤：不满足 require 的放回队尾，找一张可用的
+    var id = null, ev = null;
+    for (var tries = 0; tries < pool.length + D.EVENTS[type].length; tries++) {
+      if (!pool.length) {
+        G.pools[type] = shuffle(D.EVENTS[type].map(function (e) { return e.id; }));
+        pool = G.pools[type];
+      }
+      id = pool.shift();
+      ev = findEvent(type, id);
+      if (ev && (!ev.require || ev.require(G))) return ev;
+      pool.push(id); // 不满足条件，放回队尾
+      ev = null;
+    }
+    return ev || findEvent(type, pool[0]);
   }
 
   // ============================================================
@@ -110,20 +124,31 @@
     if (S.chan) { S.chan.close(); S.chan = null; }
     S.room = DuoNet.normalizeCode(room);
     S.role = role;
+
+    function sendHello() {
+      sendHost({ t: 'hello', name: S.myName });
+    }
+
     S.chan = new DuoNet.RoomChannel({
       room: S.room,
       role: role,
       onMessage: role === 'host' ? onHostMessage : onGuestMessage,
       onStatus: onConnStatus,
+      onReady: function () {
+        // 首次连上 broker：guest 立即发入房握手（不依赖 setTimeout，避免被冻结吞掉）
+        if (role === 'guest') {
+          sendHello();
+          setTimeout(function () { if (S.chan && !S.peerName) sendHello(); }, 1500);
+          setTimeout(function () { if (S.chan && !S.peerName) sendHello(); }, 3500);
+        }
+      },
       onReconnect: function () {
         // 断线重连后重新握手，让对方补发当前进度快照
         setTimeout(function () {
           if (!S.chan) return;
           if (role === 'guest') {
-            sendHost({ t: 'hello', name: S.myName });
-            setTimeout(function () {
-              if (S.chan && !S.peerName) sendHost({ t: 'hello', name: S.myName });
-            }, 2500);
+            sendHello();
+            setTimeout(function () { if (S.chan && !S.peerName) sendHello(); }, 2500);
           } else if (S.peerName && S.phase !== 'lobby') {
             sendHost(syncPayload());
           }
@@ -358,13 +383,15 @@
       sendHost({ t: 'claimFail', iid: iid, reason: 'taken' });
       return;
     }
-    if (D.ITEMS[it.id].kind === 'heavy') { hostHandleHeavyTap(iid, role); return; }
+    // 大件与神秘箱子都需要两人合力
+    if (D.ITEMS[it.id].kind !== 'light') { hostHandleHeavyTap(iid, role); return; }
     if (G.scav.bag[role].length >= D.BAG_CAP) {
       sendHost({ t: 'claimFail', iid: iid, reason: 'full' });
       return;
     }
     it.taken = true; it.by = role;
     G.scav.bag[role].push(it.id);
+    G.stats.claims[role]++;
     sendHost({ t: 'itemGone', iid: iid, by: role, id: it.id });
     onItemGoneLocal(iid, role, it.id);
   }
@@ -372,7 +399,7 @@
   function hostHandleHeavyTap(iid, role) {
     if (S.phase !== 'scav') return;
     var it = G.scav.items[iid];
-    if (!it || it.taken || D.ITEMS[it.id].kind !== 'heavy') return;
+    if (!it || it.taken || D.ITEMS[it.id].kind === 'light') return;
     var pending = G.scav.heavyPending[iid];
     var now = Date.now();
     if (pending && (now - pending.ts > 6000)) { pending = null; delete G.scav.heavyPending[iid]; }
@@ -406,8 +433,18 @@
     });
     G.scav.items.forEach(function (it) {
       if (it.taken && it.by === 'both') {
-        if (it.id === 'barrel') G.res.water += 4;
-        else G.items[it.id] = (G.items[it.id] || 0) + 1;
+        if (it.id === 'mystery') {
+          // 神秘箱子：随机大奖
+          var roll = Math.random();
+          if (roll < 0.35) { G.res.food += 2; logs.push('🎁 神秘箱子开出两罐头！'); }
+          else if (roll < 0.7) { G.res.water += 2; logs.push('🎁 神秘箱子开出两瓶水！'); }
+          else if (roll < 0.85) { G.items.medkit++; logs.push('🎁 神秘箱子开出一个急救包！'); }
+          else { G.items.battery = (G.items.battery || 0) + 2; logs.push('🎁 神秘箱子开出两节电池！'); }
+        } else if (it.id === 'barrel') {
+          G.res.water += 4;
+        } else {
+          G.items[it.id] = (G.items[it.id] || 0) + 1;
+        }
       }
     });
     logs.push('搜刮结束：🥫×' + G.res.food + '　🧴×' + G.res.water);
@@ -487,6 +524,10 @@
 
     ce.stage = 'reveal';
     ce.revealAt = Date.now() + 5200; // 看门狗负责夜间结算
+    if (ev.type === 'skill') {
+      clearInterval(G._skillTimer);
+      if (ce.taps.host + ce.taps.guest >= (ev.threshold || 20)) G.stats.skillWins++;
+    }
     var outcome = computeOutcome(ev, ce);
     applyDeltas(outcome.deltas || {});
     ce.revealText = outcome.text;
@@ -536,16 +577,41 @@
         G.items[k] = Math.max(0, (G.items[k] || 0) + d.items[k]);
       });
     }
+    if (d.flags) {
+      Object.keys(d.flags).forEach(function (k) { G.flags[k] = d.flags[k]; });
+    }
+    var roleFor = function (suffix) { return suffix === 'A' ? 'host' : 'guest'; };
     ['healthA', 'healthB', 'sanityA', 'sanityB'].forEach(function (k) {
       if (!d[k]) return;
-      var role = k.charAt(k.length - 1) === 'A' ? 'host' : 'guest';
-      var p = G.players[role];
+      var p = G.players[roleFor(k.charAt(k.length - 1))];
       if (k.indexOf('health') === 0) p.health = Math.max(0, Math.min(100, p.health + d[k]));
       else p.sanity = Math.max(0, Math.min(100, p.sanity + d[k]));
       if (p.health <= 0 && p.alive) {
         p.alive = false;
       }
     });
+    // 决策者定向效果（healthD / sanityD）
+    if ((d.healthD || d.sanityD) && G.curEvent) {
+      var dp = G.players[G.curEvent.decider] || G.players.host;
+      if (d.healthD) dp.health = Math.max(0, Math.min(100, dp.health + d.healthD));
+      if (d.sanityD) dp.sanity = Math.max(0, Math.min(100, dp.sanity + d.sanityD));
+      if (dp.health <= 0 && dp.alive) dp.alive = false;
+    }
+    // 状态效果：statusA / statusB = { sick: 天数, ... }；statusD 同理作用于决策者
+    ['statusA', 'statusB', 'statusD'].forEach(function (k) {
+      if (!d[k]) return;
+      var role = k === 'statusD' ? (G.curEvent ? G.curEvent.decider : 'host') : roleFor(k.charAt(k.length - 1));
+      var st = G.players[role].status;
+      Object.keys(d[k]).forEach(function (sk) {
+        st[sk] = Math.max(0, Math.min(9, (st[sk] || 0) + d[k][sk]));
+      });
+    });
+  }
+
+  function statusLine(role, key, n) {
+    var def = D.STATUS[key];
+    if (!def) return null;
+    return def.icon + ' ' + G.players[role].name + ' ' + def.name + ' ' + n + '天';
   }
 
   function deltaLines(d) {
@@ -561,6 +627,22 @@
     if (d.healthB) lines.push('❤️ ' + names.guest + ' ' + fmtDelta(d.healthB));
     if (d.sanityA) lines.push('🙂 ' + names.host + ' ' + fmtDelta(d.sanityA));
     if (d.sanityB) lines.push('🙂 ' + names.guest + ' ' + fmtDelta(d.sanityB));
+    if (d.healthD && G.curEvent) lines.push('❤️ ' + names[G.curEvent.decider] + '(决策者) ' + fmtDelta(d.healthD));
+    if (d.sanityD && G.curEvent) lines.push('🙂 ' + names[G.curEvent.decider] + '(决策者) ' + fmtDelta(d.sanityD));
+    ['statusA', 'statusB'].forEach(function (k) {
+      if (!d[k]) return;
+      var role = roleFor(k.charAt(k.length - 1));
+      Object.keys(d[k]).forEach(function (sk) {
+        var l = statusLine(role, sk, d[k][sk]);
+        if (l) lines.push(l);
+      });
+    });
+    if (d.statusD && G.curEvent) {
+      Object.keys(d.statusD).forEach(function (sk) {
+        var l = statusLine(G.curEvent.decider, sk, d.statusD[sk]);
+        if (l) lines.push(l);
+      });
+    }
     return lines;
   }
   function fmtDelta(n) { return (n > 0 ? '+' : '') + n; }
@@ -592,6 +674,28 @@
     living.forEach(function (r) { G.players[r].sanity = Math.max(0, Math.min(100, G.players[r].sanity + morale)); });
     if (morale >= 0) logs.push('士气 +' + morale + '（🧸🃏⚡带来的安慰）');
     else logs.push('士气 ' + morale + '（地堡生活的沉闷）');
+    // 状态效果结算：🤒生病每晚-3❤️ | 🤕受伤每晚-5❤️ | ✨鼓舞每晚+4🙂；天数-1
+    living.forEach(function (r) {
+      var p = G.players[r];
+      Object.keys(p.status).forEach(function (k) {
+        if (!(p.status[k] > 0)) return;
+        var def = D.STATUS[k];
+        if (!def) return;
+        if (def.perNight.health) p.health = Math.max(0, p.health + def.perNight.health);
+        if (def.perNight.sanity) p.sanity = Math.max(0, Math.min(100, p.sanity + def.perNight.sanity));
+        logs.push(def.icon + ' ' + p.name + ' ' + def.name + '（' + (def.perNight.health ? '❤️' + fmtDelta(def.perNight.health) : '🙂' + fmtDelta(def.perNight.sanity)) + '），还剩 ' + (p.status[k] - 1) + ' 天');
+        p.status[k]--;
+        if (p.health <= 0 && p.alive) p.alive = false;
+      });
+    });
+    // 鼠室友彩蛋：每晚士气+2，但偶尔偷粮
+    if (G.flags.mice) {
+      living.forEach(function (r) {
+        G.players[r].sanity = Math.max(0, Math.min(100, G.players[r].sanity + 2));
+      });
+      if (G.res.food > 0 && Math.random() < 0.15) { G.res.food--; logs.push('🐭 鼠室友半夜偷吃了一份存粮'); }
+      else logs.push('🐭 鼠室友蹭喝了一点水，相安无事');
+    }
     // 死亡结算
     living = ['host', 'guest'].filter(function (r) { return G.players[r].alive; });
     living.forEach(function (r) {
@@ -612,12 +716,15 @@
       if (alive.length === 2) {
         var avgH = (G.players.host.health + G.players.guest.health) / 2;
         var avgS = (G.players.host.sanity + G.players.guest.sanity) / 2;
-        key = (avgH >= 50 && avgS >= 50) ? 'perfect' : 'good';
+        // 隐藏结局优先：集齐 L 线索 → S+；养鼠党 → 鼠王
+        if (G.flags.l1 && G.flags.l2) key = 'story';
+        else if (G.flags.mice) key = 'miceking';
+        else key = (avgH >= 50 && avgS >= 50) ? 'perfect' : 'good';
       } else key = 'rough';
     }
     var e = D.ENDINGS[key];
     S.phase = 'end';
-    sendHost({ t: 'end', key: key, title: e.title, text: e.text, day: G.day, res: G.res, players: G.players });
+    sendHost({ t: 'end', key: key, title: e.title, text: e.text, day: G.day, res: G.res, players: G.players, stats: G.stats });
     renderEnd(e, G);
   }
 
@@ -822,7 +929,7 @@
   function onScavItemClick(iid) {
     if (!S.chan || S.phase !== 'scav') return;
     var def = scavItemDef(iid);
-    var isHeavy = !!(def && def.kind === 'heavy');
+    var isHeavy = !!(def && def.kind !== 'light'); // 大件与神秘箱子都需两人合力
     if (!isHeavy && Date.now() < S.cooldownUntil) { toast('整理背包中…'); return; }
     if (S.role === 'host') {
       if (!G || !G.scav || !G.scav.items) return;
@@ -914,7 +1021,13 @@
     ['host', 'guest'].forEach(function (role) {
       var p = st.players[role];
       var label = (role === S.role ? '我·' : '搭档·') + names[role];
-      html += '<div class="pp' + (p.alive ? '' : ' dead') + '"><b>' + esc(label) + '</b>' +
+      var stChips = '';
+      if (p.status) {
+        Object.keys(p.status).forEach(function (k) {
+          if (p.status[k] > 0 && D.STATUS[k]) stChips += '<span class="chip">' + D.STATUS[k].icon + '×' + p.status[k] + '</span>';
+        });
+      }
+      html += '<div class="pp' + (p.alive ? '' : ' dead') + '"><b>' + esc(label) + '</b>' + stChips +
         '<div class="bar"><i style="width:' + p.health + '%"></i></div><span>❤️' + p.health + '</span>' +
         '<div class="bar san"><i style="width:' + p.sanity + '%"></i></div><span>🙂' + p.sanity + '</span></div>';
     });
@@ -1083,17 +1196,22 @@
     showScreen('scr-end');
     $('end-title').textContent = e.title;
     $('end-text').textContent = e.text;
-    $('end-stats').innerHTML =
+    var statsHtml =
       '<div>存活天数：<b>' + st.day + '</b> / ' + D.TOTAL_DAYS + '</div>' +
       '<div>剩余：🥫' + st.res.food + '　🧴' + st.res.water + '</div>' +
       '<div>' + esc(st.players.host.name) + ' ❤️' + st.players.host.health + ' 🙂' + st.players.host.sanity + (st.players.host.alive ? '' : '（已故）') + '</div>' +
       '<div>' + esc(st.players.guest.name) + ' ❤️' + st.players.guest.health + ' 🙂' + st.players.guest.sanity + (st.players.guest.alive ? '' : '（已故）') + '</div>';
+    if (st.stats) {
+      statsHtml += '<div>战报：' + esc(st.players.host.name) + ' 抢到 ' + st.stats.claims.host + ' 件 · ' +
+        esc(st.players.guest.name) + ' 抢到 ' + st.stats.claims.guest + ' 件 · 合力挑战成功 ' + st.stats.skillWins + ' 次</div>';
+    }
+    $('end-stats').innerHTML = statsHtml;
     $('btn-again').classList.toggle('hidden', S.role !== 'host');
     $('end-wait').classList.toggle('hidden', S.role === 'host');
   }
   function renderEndGuest(msg) {
     S.phase = 'end';
-    renderEnd({ title: msg.title, text: msg.text }, { day: msg.day, res: msg.res, players: msg.players });
+    renderEnd({ title: msg.title, text: msg.text }, { day: msg.day, res: msg.res, players: msg.players, stats: msg.stats });
   }
 
   // ============================================================
@@ -1149,13 +1267,8 @@
       S.phase = 'lobby';
       showScreen('scr-lobby');
       renderLobbyGuestWaiting();
-      // 连接建立后再发 hello（等 connected 状态或直接发，MQTT 会排队）
-      setTimeout(function () {
-        sendHost({ t: 'hello', name: S.myName });
-      }, 600);
-      setTimeout(function () {
-        if (!S.peerName) sendHost({ t: 'hello', name: S.myName });
-      }, 2500);
+      // hello 由 onReady（broker 首连成功）触发，这里只做一次立即尝试
+      sendHost({ t: 'hello', name: S.myName });
     });
 
     $('btn-join-back').addEventListener('click', function () {
@@ -1243,6 +1356,8 @@
         base.bag = G.scav.bag;
         base.heavyPending = Object.keys(G.scav.heavyPending);
         base.takenCount = G.scav.items.filter(function (i) { return i.taken; }).length;
+        base.res = G.res; base.items = G.items; base.flags = G.flags; base.stats = G.stats;
+        base.players = G.players;
       } else if (M) {
         base.bag = M.bag || null;
         base.mirrorPhase = M.phase;
@@ -1261,6 +1376,15 @@
     // 测试辅助：手动跑一次看门狗（环境定时器冻结时的确定性推进）
     window.__duoKick = function () {
       try { hostWatchdog(); return 'kicked'; } catch (e) { return 'err: ' + e.message; }
+    };
+    // 测试辅助：直接给某位玩家加状态（验证状态系统用）
+    window.__duoStatus = function (role, key, days) {
+      if (S.role !== 'host' || !G) return 'host only';
+      var d = role === 'guest' ? { statusB: {} } : { statusA: {} };
+      d[role === 'guest' ? 'statusB' : 'statusA'][key] = days;
+      applyDeltas(d);
+      renderHUD();
+      return 'ok';
     };
   });
 })();

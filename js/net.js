@@ -27,15 +27,16 @@
 
   /**
    * RoomChannel：一个房间连接。
-   * opts: { room, role: 'host'|'guest', onMessage(msg), onStatus(status, detail), onReconnect() }
+   * opts: { room, role: 'host'|'guest', onMessage(msg), onStatus(status, detail), onReady(), onReconnect() }
    * status: 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'failed'
-   * onReconnect：断线后重新连上时触发（首次连接不触发），用于重新握手同步。
+   * onReady：首次连上 broker 时触发；onReconnect：断线后重连成功时触发。
    */
   function RoomChannel(opts) {
     this.room = normalizeCode(opts.room);
     this.role = opts.role;
     this.onMessage = opts.onMessage || function () {};
     this.onStatus = opts.onStatus || function () {};
+    this.onReady = opts.onReady || function () {};
     this.onReconnect = opts.onReconnect || function () {};
     this.client = null;
     this.brokerIdx = 0;
@@ -89,6 +90,9 @@
           if (self._everConnected) {
             // 断线重连：订阅已恢复，但 QoS0 消息会丢，上层需要重新握手同步
             try { self.onReconnect(); } catch (e) {}
+          } else {
+            // 首次连上：上层可以立刻发送入房握手
+            try { self.onReady(); } catch (e) {}
           }
           self._everConnected = true;
           self._errCount = 0;
